@@ -15,23 +15,20 @@ matter_server_args=()
 extra_args=()
 
 # Configure log levels
-if ! bashio::config.exists log_level; then
-  bashio::log.magenta "No log_level set, defaulting to 'info'"
-fi
 log_level=$(bashio::string.lower "$(bashio::config log_level info)")
 log_level_sdk=$(bashio::string.lower "$(bashio::config log_level_sdk error)")
 
-# Install specific Matter Server version if requested
+# Install Matter Server version if specified
 if bashio::config.has_value "matter_server_version"; then
   matter_server_version=$(bashio::config 'matter_server_version')
-  bashio::log.info "Installing Matter Server version ${matter_server_version}"
+  bashio::log.info "Installing Matter Server ${matter_server_version}"
   pip3 install --pre python-matter-server[server]=="${matter_server_version}"
 elif bashio::config.true "beta"; then
-  bashio::log.info "Installing latest beta of Matter Server"
+  bashio::log.info "Installing latest beta Matter Server"
   pip3 install --upgrade --pre python-matter-server[server]
 fi
 
-# Install optional Matter SDK components
+# Install Matter SDK if specified
 if bashio::config.has_value "matter_sdk_wheels_version"; then
   chip_version=$(bashio::config 'matter_sdk_wheels_version')
   bashio::log.info "Installing Matter SDK ${chip_version}"
@@ -40,14 +37,14 @@ if bashio::config.has_value "matter_sdk_wheels_version"; then
     home-assistant-chip-core=="${chip_version}"
 fi
 
-# Determine server port and address binding
+# Determine server port and network binding
 server_port="$(bashio::addon.port 5580)"
 if ! bashio::var.has_value "${server_port}"; then
   server_port=5580
   extra_args+=('--listen-address' "$(bashio::addon.ip_address)")
 fi
 
-# Add optional arguments
+# Append optional arguments
 if bashio::config.true "enable_test_net_dcl"; then
   extra_args+=('--enable-test-net-dcl')
 fi
@@ -58,14 +55,15 @@ if bashio::config.has_value "matter_server_args"; then
   extra_args+=($(bashio::config 'matter_server_args'))
 fi
 
-bashio::log.info "Using forced interface: ${primary_interface}"
+# Log and confirm hardcoded interface
+bashio::log.info "Forcing primary interface: ${primary_interface}"
 
-# Notify Home Assistant for discovery
+# Broadcast to HA discovery
 /etc/s6-overlay/scripts/matter-server-discovery &
 
 cd /root
 
-# Prepare arguments for Matter Server
+# Construct Matter Server arguments
 matter_server_args+=(
   '--storage-path' "/data"
   '--port' "${server_port}"
@@ -79,10 +77,10 @@ matter_server_args+=(
   "${extra_args[@]}"
 )
 
-# Execute the server
+# Launch Matter Server
 if bashio::config.true "beta"; then
-  exec /usr/bin/gdb --quiet -ex="set confirm off" -ex run -ex backtrace -ex "quit \$_exitcode" --args /usr/local/bin/python \
-       /usr/local/bin/matter-server "${matter_server_args[@]}"
+  exec /usr/bin/gdb --quiet -ex="set confirm off" -ex run -ex backtrace -ex "quit \$_exitcode" --args \
+       /usr/local/bin/python /usr/local/bin/matter-server "${matter_server_args[@]}"
 else
   exec /usr/local/bin/matter-server "${matter_server_args[@]}"
 fi
