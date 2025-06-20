@@ -1,43 +1,37 @@
 #!/usr/bin/with-contenv bashio
-# vim: ft=bash
-# shellcheck shell=bash
 # ==============================================================================
-# Start matter-server service for SmartEase Hub with forced tap0 interface
+# SmartEase Matter Server - Offline-first with forced tap0 interface
 # ==============================================================================
 
-bashio::log.info "Starting Matter Server..."
+bashio::log.info "Starting SmartEase Matter Server..."
 
 declare server_port
 declare log_level
 declare log_level_sdk
-declare primary_interface="tap0"  # Force SmartEase offline interface
+declare primary_interface="tap0"
 declare matter_server_version
 declare chip_version
 matter_server_args=()
 extra_args=()
 
-# Set default log level if not provided
+# Configure log levels
 if ! bashio::config.exists log_level; then
-  bashio::log.magenta 'No log_level set in config, fallback to info'
+  bashio::log.magenta "No log_level set, defaulting to 'info'"
 fi
 log_level=$(bashio::string.lower "$(bashio::config log_level info)")
-
-# Make Matter SDK log level currently default to error
 log_level_sdk=$(bashio::string.lower "$(bashio::config log_level_sdk error)")
 
-# Install specified Matter Server version, or upgrade to beta if configured
+# Install specific Matter Server version if requested
 if bashio::config.has_value "matter_server_version"; then
   matter_server_version=$(bashio::config 'matter_server_version')
-  bashio::log.info "Installing Python Matter Server ${matter_server_version}"
-  # shellcheck disable=SC2102
+  bashio::log.info "Installing Matter Server version ${matter_server_version}"
   pip3 install --pre python-matter-server[server]=="${matter_server_version}"
 elif bashio::config.true "beta"; then
-  bashio::log.info 'Upgrading Python Matter Server to latest pre-release'
-  # shellcheck disable=SC2102
+  bashio::log.info "Installing latest beta of Matter Server"
   pip3 install --upgrade --pre python-matter-server[server]
 fi
 
-# Install the Matter SDK version if configured
+# Install optional Matter SDK components
 if bashio::config.has_value "matter_sdk_wheels_version"; then
   chip_version=$(bashio::config 'matter_sdk_wheels_version')
   bashio::log.info "Installing Matter SDK ${chip_version}"
@@ -46,27 +40,32 @@ if bashio::config.has_value "matter_sdk_wheels_version"; then
     home-assistant-chip-core=="${chip_version}"
 fi
 
-# Bind to internal hassio network unless the user requests to expose it
+# Determine server port and address binding
 server_port="$(bashio::addon.port 5580)"
 if ! bashio::var.has_value "${server_port}"; then
-    server_port=5580
-    extra_args+=('--listen-address' "$(bashio::addon.ip_address)")
+  server_port=5580
+  extra_args+=('--listen-address' "$(bashio::addon.ip_address)")
 fi
 
+# Add optional arguments
 if bashio::config.true "enable_test_net_dcl"; then
-    extra_args+=('--enable-test-net-dcl')
+  extra_args+=('--enable-test-net-dcl')
+fi
+if bashio::config.has_value "bluetooth_adapter_id"; then
+  extra_args+=('--bluetooth-adapter' "$(bashio::config 'bluetooth_adapter_id')")
+fi
+if bashio::config.has_value "matter_server_args"; then
+  extra_args+=($(bashio::config 'matter_server_args'))
 fi
 
-# Use tap0 for the primary interface (forced)
-bashio::log.info "Forcing ${primary_interface} as the primary network interface."
+bashio::log.info "Using forced interface: ${primary_interface}"
 
-# Send out discovery information to Home Assistant
+# Notify Home Assistant for discovery
 /etc/s6-overlay/scripts/matter-server-discovery &
 
-# Change directory to /root
 cd /root
 
-# Prepare the matter-server arguments
+# Prepare arguments for Matter Server
 matter_server_args+=(
   '--storage-path' "/data"
   '--port' "${server_port}"
@@ -77,14 +76,14 @@ matter_server_args+=(
   '--ota-provider-dir' "/config/updates"
   '--fabricid' 2
   '--vendorid' 4939
-  ${extra_args[@]}
+  "${extra_args[@]}"
 )
 
-# Run the Matter Server, using gdb in beta mode if configured
+# Execute the server
 if bashio::config.true "beta"; then
-    exec /usr/bin/gdb --quiet -ex="set confirm off" -ex run -ex backtrace -ex "quit \$_exitcode" --args /usr/local/bin/python \
-         /usr/local/bin/matter-server "${matter_server_args[@]}"
+  exec /usr/bin/gdb --quiet -ex="set confirm off" -ex run -ex backtrace -ex "quit \$_exitcode" --args /usr/local/bin/python \
+       /usr/local/bin/matter-server "${matter_server_args[@]}"
 else
-    exec /usr/local/bin/matter-server "${matter_server_args[@]}"
+  exec /usr/local/bin/matter-server "${matter_server_args[@]}"
 fi
 
